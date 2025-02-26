@@ -443,8 +443,6 @@ $jsonBody = New-APIApplicationBody -orgID $OGID `
 # Generate header for JSON submission (defaults to Content-Type application/json).
 $header = Create-UEMAPIHeader -APIUser $APIUser -APIPassword $APIPassword -APIKey $APIKey 
 
-$jsonBody | Out-File -FilePath "$PSScriptRoot\body.txt" -Force
-
 # Create/update the application by initiating the installation via the API.
 $url = "https://$APIEndpoint/api/mam/apps/internal/begininstall"
 Invoke-RestMethod -Uri $url -Method 'POST' -Headers $header -Body $jsonBody -Verbose

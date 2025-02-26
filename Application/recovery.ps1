@@ -42,7 +42,7 @@ param(
 . "$PSScriptRoot\General_Functions.ps1"
 
 # Define the path to the SQLLite Data
-$SQLPath = "$($DestinationPath)\SQLite"
+$SQLPath = "$($PSScriptRoot)\SQLite"
 
 # Add the .dll to work with SQLite
 Add-Type -Path "$($SQLPath)\System.Data.SQLite.dll"
