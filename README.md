@@ -10,6 +10,7 @@ Workspace ONE Autorecovery is a comprehensive PowerShell-based solution designed
 2. [Installation & Initial Configuration](#installation--initial-configuration)
    - [Prerequisites](#prerequisites)
    - [Configuration File: config.json](#configuration-file-configjson)
+   - [Upload to UEM](#upload-to-uem)
    - [Installation Script: install.ps1](#installation-script-installps1)
    - [Initial Detection Script: detection.ps1](#initial-detection-script-detectionps1)
 3. [Main Health Evaluation](#main-health-evaluation)
@@ -66,6 +67,17 @@ Before running the autorecovery processes, you must prepare your environment by 
      - **LoggingPath:** Path where logs and database files will be stored.
      - **Thresholds:** Numeric values or parameters to trigger alerts or remediation.
   3. Save the file.
+
+### Upload to UEM
+
+- **Instructions:**
+  1. Save all files in a folder - store the application folder also in the same space
+  2. run the upload_to_ws1.ps1 - for example like this
+    - Upload_to_ws1.ps1  -APIEndpoint "as1831.awmdm.com" -APIUser "admin" -APIPassword "password" -APIKey "ABC123" -OGID "1298"
+    - This will create all required files and settings and uploads the data to Workspace ONE UEM
+  3. Deploy it to a test device
+  4. Deploy it to production
+  5. Lean back and let the Script do the work
 
 ### Installation Script: install.ps1
 

@@ -1,11 +1,11 @@
 param(
-    [Parameter(Mandatory = $true, ValueFromPipeline = $true, HelpMessage = "File Hash of the ws1_autorepair.ps1 file")]
+    [Parameter(Mandatory = $true, ValueFromPipeline = $true, HelpMessage = "File Hash of the HubHealthEvaluation.ps1 file")]
     [ValidatePattern("^[a-fA-F0-9]{64}$")]
     [String] $FileHash
 )
 
 $InstallDir = "C:\Windows\UEMRecovery"
-$TargetFile = "$InstallDir\ws1_autorepair.ps1"
+$TargetFile = "$InstallDir\HubHealthEvaluation.ps1"
 
 # Validate that the installation directory exists
 if (-not (Test-Path $InstallDir)) {
