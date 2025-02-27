@@ -143,7 +143,7 @@ catch {
 # -------------------------------
 
 # Variables
-$taskName = "WorkspaceONE Autorepair"
+$taskName = "WorkspaceONE Hub Health"
 $scriptPath = "$($DestinationPath)\HubHealthEvaluation.ps1"
 
 # Check for Existing Scheduled Task

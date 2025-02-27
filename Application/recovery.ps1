@@ -47,9 +47,6 @@ $SQLPath = "$($PSScriptRoot)\SQLite"
 # Add the .dll to work with SQLite
 Add-Type -Path "$($SQLPath)\System.Data.SQLite.dll"
 
-# Define the SQLite database file path  
-$dbPath = "$DestinationPath\HUBHealth.sqlite"
-
 # Define the SQLite database file path
 $dbPath = "$PSScriptRoot\HUBHealth.sqlite"
 
@@ -96,7 +93,7 @@ do {
     Start-Sleep 20 
     if ($Process) {            
         Write-Log "Explorer started, starting Screenlock Scheduled Task" -Severity "INFO"
-        if ($Configuration.ReEnrollmentWithCurrentUserSession -eq $false) {
+        if ($Configuration.ReEnrollmentWithCurrentUserSession -eq $false -or $Configuration.EnrollDuringCurrentUserSession -eq $false) {
             #lock device screen
             Start-ScheduledTask "Screenlock"
         }
@@ -386,7 +383,8 @@ do {
             # Disable the Scheduled Task
             Write-Log "Attempting to delete the scheduled task 'WorkspaceONE Recovery'."
             try {
-                Unregister-ScheduledTask -TaskName "WorkspaceONE Recovery" -Confirm:$false -ErrorAction Stop
+                Unregister-ScheduledTask -TaskName "WorkspaceONE Recovery" -Confirm:$false
+                Unregister-ScheduledTask -TaskName "WorkspaceONE Enrollment" -Confirm:$false
                 Write-Log "Scheduled task 'WorkspaceONE Recovery' successfully deleted."
             }
             catch {
@@ -402,7 +400,7 @@ do {
 Remove-Item -Path $agentPath -Force
 
 
-if (($Configuration.AutoReEnrollment) -eq "True") {
+if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False" -or ($Configuration.EnrollDuringCurrentUserSession) -eq "False") {
     
     if ($Configuration.ReEnrollmentWithCurrentUserSession -eq $false) {
         #Remove autologon settings

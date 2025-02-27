@@ -178,13 +178,13 @@ if ($EnrollmentStatus.PSObject.Properties.Value -notcontains $false) {
                     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
                 }
 
-                if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False") {
+                if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "True") {
                     $scriptPath = "$($DestinationPath)\recovery.ps1"
 
                     # Set the task to run as loggendin User
                     $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -LogonType Interactive
                 }
-                elseif (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "True") {
+                elseif (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False") {
                     $scriptPath = "$($DestinationPath)\UEM_automatic_reenrollment.ps1"
 
                     # Set the task to run as SYSTEM
@@ -239,7 +239,7 @@ else {
             # Create scheduled task to re-enroll the device
 
             # Variables
-            $taskName = "WorkspaceONE Autorepair"
+            $taskName = "WorkspaceONE Recovery"
             $timeOfDay = "$($Configuration.EnrollmentTime)"
             $dayOfWeek = "$($Configuration.EnrollmentDay)"
 
@@ -249,21 +249,23 @@ else {
                 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
             }
 
-            if (($Configuration.EnrollDuringCurrentUserSession) -eq "False") {
+            if (($Configuration.EnrollDuringCurrentUserSession) -eq "True") {
                 $scriptPath = "$($DestinationPath)\recovery.ps1"
 
                 # Set the task to run as loggendin User
                 $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -LogonType Interactive
+
             }
-            elseif (($Configuration.EnrollDuringCurrentUserSession) -eq "True") {
+            elseif (($Configuration.EnrollDuringCurrentUserSession) -eq "False") {
                 $scriptPath = "$($DestinationPath)\UEM_automatic_reenrollment.ps1"
 
                 # Set the task to run as SYSTEM
                 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
+
             }
                 
             # Create an action to run the PowerShell script
-            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -ExpectedHash $expectedHash"
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
 
             # Create a trigger to run the task weekly on the specified day and time
             $trigger = New-ScheduledTaskTrigger -Weekly -At $timeOfDay -DaysOfWeek $dayOfWeek
