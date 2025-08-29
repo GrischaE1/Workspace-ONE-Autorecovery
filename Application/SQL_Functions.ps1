@@ -10,8 +10,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-02-15
-    Version      : 1.0.0
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Purpose      : To centralize SQLite database operations, allowing other scripts in the Workspace ONE Autorecovery
                    solution to log events and manage data efficiently.
     Dependencies : Requires the appropriate SQLite libraries or modules to be installed and accessible in the environment.

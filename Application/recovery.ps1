@@ -34,8 +34,40 @@
 param(
     # Path to the log file where script output will be saved
     [Parameter(HelpMessage = "Path to the log file where script output will be saved")]
-    [string]$logFilePath = "C:\Windows\UEMRecovery\Logs\recovery.txt"
+    [string]$logFilePath = "C:\Windows\UEMRecovery\Logs\recovery.log"
 )
+
+# --- Global timeout watchdog (28 minutes)
+$GlobalTimeoutMinutes = 28
+
+Start-Job -Name "RecoveryWatchdog" -ArgumentList $GlobalTimeoutMinutes -ScriptBlock {
+    param($timeoutMinutes)
+    Start-Sleep -Seconds ($timeoutMinutes * 60)
+
+    # Cleanup autologon registry keys
+    $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    if (Test-Path $RegistryPath) {
+        Remove-ItemProperty $RegistryPath -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultUsername" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultDomain" -ErrorAction SilentlyContinue
+    }
+
+    $logonPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI"
+    if (Test-Path $logonPath) {
+        Set-ItemProperty $logonPath -Name "LastLoggedOnUser" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnUserSID" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnDisplayName" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnSamUser" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "SelectedUserSID" -Value "" -ErrorAction SilentlyContinue
+    }
+
+    Unregister-ScheduledTask -TaskName "WorkspaceONE Enrollment" -Confirm:$false
+
+    Add-Content -Path "C:\Windows\UEMRecovery\Logs\recovery.txt" -Value \"[Watchdog] Timeout reached. Cleanup executed. Exiting script.\"
+    
+    Stop-Process -Id $PID -Force  # kill the main script process
+} | Out-Null
 
 #importing the SQL functions
 . "$PSScriptRoot\SQL_Functions.ps1"
@@ -399,28 +431,29 @@ do {
 # Save space and remove the downloaded Hub again
 Remove-Item -Path $agentPath -Force
 
+# Kill watchdog if still running
+Get-Job -Name "RecoveryWatchdog" -State Running | Stop-Job | Remove-Job
 
 if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False" -or ($Configuration.EnrollDuringCurrentUserSession) -eq "False") {
     
-    if ($Configuration.ReEnrollmentWithCurrentUserSession -eq $false) {
-        #Remove autologon settings
-        $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-        Remove-ItemProperty $RegistryPath -name "AutoAdminLogon"
-        Remove-ItemProperty $RegistryPath -name "DefaultUsername" 
-        Remove-ItemProperty $RegistryPath -name "DefaultPassword" 
-
-        #Remove the "Installer" account information from the login screen
-        New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -name "LastLoggedOnUser" -PropertyType String -Value "" -Force
-        New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -name "LastLoggedOnUserSID" -PropertyType String -Value "" -Force
-        New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -name "LastLoggedOnDisplayName" -PropertyType String -Value "" -Force
-        New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -name "LastLoggedOnSamUser" -PropertyType String -Value "" -Force
-        New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI" -name "SelectedUserSID" -PropertyType String -Value "" -Force
-
     
-    
-        #Restart the device if not in the current user session
-        $shutdown = "/r /t 20 /f"
-        Start-Process shutdown.exe -ArgumentList $shutdown
-    }
+    # Remove autologon settings
+    $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    Remove-ItemProperty $RegistryPath -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
+    Remove-ItemProperty $RegistryPath -Name "DefaultUsername" -ErrorAction SilentlyContinue
+    Remove-ItemProperty $RegistryPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+    Remove-ItemProperty $RegistryPath -Name "DefaultDomain" -ErrorAction SilentlyContinue
+
+    # Remove login screen traces
+    $logonPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI"
+    New-ItemProperty $logonPath -Name "LastLoggedOnUser" -PropertyType String -Value "" -Force
+    New-ItemProperty $logonPath -Name "LastLoggedOnUserSID" -PropertyType String -Value "" -Force
+    New-ItemProperty $logonPath -Name "LastLoggedOnDisplayName" -PropertyType String -Value "" -Force
+    New-ItemProperty $logonPath -Name "LastLoggedOnSamUser" -PropertyType String -Value "" -Force
+    New-ItemProperty $logonPath -Name "SelectedUserSID" -PropertyType String -Value "" -Force
+
+    # Restart the device if cleanup ran outside user session
+    $shutdown = "/r /t 20 /f"
+    Start-Process shutdown.exe -ArgumentList $shutdown
 
 }

@@ -10,9 +10,9 @@
     the solution.
 
 .NOTES
-    Author        : Grischa Ernst
-    Date          : 2025-02-15
-    Version       : 1.0.0
+    Author       : Grischa Ernst
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Purpose       : To centralize common operations (e.g., logging and error handling) used by the 
                     autorecovery scripts, enabling consistent behavior and easier maintenance.
     Dependencies  : None. This file is intended to be dot-sourced or imported by other scripts.
@@ -714,70 +714,34 @@ function New-EnrollmentScheduledTask {
         [bool]$UseSystemAccount
     )
 
-    $taskName  = "WorkspaceONE Autorepair"
-    $timeOfDay = $Configuration.EnrollmentTime   # e.g. "12:00"
-    $dayOfWeek = $Configuration.EnrollmentDay     # e.g. "MONDAY"
-    $script    = if ($UseSystemAccount) {
-                     "$DestinationPath\UEM_automatic_reenrollment.ps1"
-                 } else {
-                     "$DestinationPath\recovery.ps1"
-                 }
-    $actionCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -ExpectedHash $ExpectedHash"
+    $taskName = "WorkspaceONE Autorepair"
+    $timeOfDay = "$($Configuration.EnrollmentTime)"
+    $dayOfWeek = "$($Configuration.EnrollmentDay)"
 
-    # If modern ScheduledTasks module is present, use it:
-    if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) {
-        # Remove existing
-        if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-        }
-
-        # Build principal
-        if ($UseSystemAccount) {
-            $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
-        }
-        else {
-            # For interactive user, omit LogonType (defaults to Interactive)
-            $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users"
-        }
-
-        $action  = New-ScheduledTaskAction   -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -ExpectedHash $ExpectedHash"
-        $trigger = New-ScheduledTaskTrigger  -Weekly -At $timeOfDay -DaysOfWeek $dayOfWeek
-
-        Register-ScheduledTask -TaskName   $taskName `
-                              -Action     $action `
-                              -Trigger    $trigger `
-                              -Principal  $principal `
-                              -Force
-
-        Write-Output "ScheduledTask module: ✓ '$taskName' scheduled weekly on $dayOfWeek at $timeOfDay."
-
-    } 
-    else {
-        # Fallback to schtasks.exe for older PowerShell/Windows
-        # /RU SYSTEM needs no password; for interactive user, /RP "" allows running only when user is logged on
-        $runUser     = if ($UseSystemAccount) { "SYSTEM" } else { "$env:USERNAME" }
-        $passwordArg = if ($UseSystemAccount) { "" } else { '/RP ""' }
-
-        # Remove existing task if present
-        schtasks.exe /Delete /TN $taskName /F >/dev/null 2>&1
-
-        # Create using schtasks.exe
-        $schtasksArgs = @(
-            '/Create',
-            '/TN', "`"$taskName`"",
-            '/TR', "`"$actionCmd`"",
-            '/SC', 'WEEKLY',
-            '/D', $dayOfWeek,
-            '/ST', $timeOfDay,
-            '/RL', 'HIGHEST',
-            '/RU', $runUser,
-            $passwordArg,
-            '/F'
-        ) -join ' '
-
-        Write-Output "Fallback schtasks.exe: creating task..."
-        Invoke-Expression "schtasks.exe $schtasksArgs"
-
-        Write-Output "schtasks.exe: ✓ '$taskName' scheduled weekly on $dayOfWeek at $timeOfDay."
+    # Check if task already exists; if so, remove it for an update
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+        Write-Warning "Scheduled task '$taskName' already exists. It will be updated."
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
+
+    if (-not $UseSystemAccount) {
+        $scriptPath = "$DestinationPath\recovery.ps1"
+        # Set the task to run as the currently logged-in user
+        $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -LogonType Interactive
+    }
+    else {
+        $scriptPath = "$DestinationPath\UEM_automatic_reenrollment.ps1"
+        # Set the task to run as SYSTEM
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
+    }
+
+    # Create an action to run the PowerShell script with the expected hash parameter
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -ExpectedHash $ExpectedHash"
+    # Create a trigger to run the task weekly on the specified day and time
+    $trigger = New-ScheduledTaskTrigger -Weekly -At $timeOfDay -DaysOfWeek $dayOfWeek
+
+    # Register the scheduled task
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal
+
+    Write-Output "Scheduled task '$taskName' created successfully to run every $dayOfWeek at $timeOfDay."
 }

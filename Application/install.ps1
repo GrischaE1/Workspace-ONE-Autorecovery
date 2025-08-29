@@ -26,9 +26,9 @@
     ("C:\Windows\UEMRecovery") and verifying the HubHealthEvaluation.ps1 file integrity with the expected hash.
 
 .NOTES
-    Author        : Grischa Ernst
-    Date          : 2025-02-15
-    Version       : 1.0.0
+    Author       : Grischa Ernst
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Requirements  : 
                       - PowerShell 5.1 or later / PowerShell Core 7+
                       - Administrator privileges

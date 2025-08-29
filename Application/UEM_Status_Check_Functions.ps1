@@ -10,8 +10,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-02-15
-    Version      : 1.0.0
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Purpose      : To implement utility functions for verifying the operational status of Workspace ONE UEM services.
     Dependencies : Access to Workspace ONE UEM endpoints and proper configuration settings.
     Usage        : This file is intended to be dot-sourced or imported by other scripts:

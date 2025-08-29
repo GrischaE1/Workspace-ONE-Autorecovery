@@ -5,16 +5,16 @@
   "ThresholdReached": "False",
   "AutoReEnrollment": "True",
   "ReEnrollmentWithCurrentUserSession": "True",
-  "EnrollmentDefinedDate": "True",
-  "EnrollmentDay": "Thursday",
+  "EnrollmentDefinedDate": "False",
+  "EnrollmentDay": "Monday,Thursday",
   "EnrollmentTime": "13:30:00",
   "EnrollIfNotEnrolled": "True",
   "EnrollDuringCurrentUserSession": "False"
   },
     "UEMConfig":{
-      "UEMEnrollmentURL": "as1831.awmdm.com",
-      "UEMEnrollmentUser": "User",
-      "UEMEnrollmentPassword": "Password",
+      "UEMEnrollmentURL": "ds1831.awmdm.com",
+      "UEMEnrollmentUser": "stagingws1",
+      "UEMEnrollmentPassword": "Pa$$w0rd",
       "UEMEnrollmentOG": "ws1"
   }
 }

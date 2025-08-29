@@ -17,8 +17,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-02-15
-    Version      : 1.0.0
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Requirements : 
                       - PowerShell 5.1 or later / PowerShell Core 7+
                       - Access to Workspace ONE UEM endpoints
@@ -69,6 +69,7 @@ Set-ItemProperty $RegistryPath 'AutoAdminLogon' -Value "1" -Type String
 Set-ItemProperty $RegistryPath 'DefaultUsername' -Value "UEMEnrollment" -type String 
 Set-ItemProperty $RegistryPath 'DefaultPassword' -Value "$($Password)" -type String
 Set-ItemProperty $RegistryPath 'EnableFirstLogonAnimation' -Value "0" -Type String
+Set-ItemProperty $RegistryPath 'DefaultDomain' -Value "$($env:computername)" -Type String
 
 #Skip user prompts after login
 reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v "PrivacyConsentStatus" /t REG_DWORD /d 1 /f
@@ -79,13 +80,16 @@ reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\OOBE" /v "Disabl
 reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\OOBE" /v "SkipUserOOBE" /t REG_DWORD /d 1 /f
 
 #Register the scheduled task to run the Workspace ONE enrollment after the device is rebooted and logged in as "Installer"
-schtasks.exe /create  /tn "WorkspaceONE Enrollment" /RU UEMEnrollment /RP "$($Password)" /sc ONLOGON /tr "powershell -executionpolicy bypass -file C:\Windows\UEMRecovery\recovery.ps1"
+schtasks.exe /create /tn "WorkspaceONE Enrollment" /ru "UEMEnrollment" /rp "$($Password)" /sc ONLOGON /tr "powershell -executionpolicy bypass -file C:\Windows\UEMRecovery\recovery.ps1" /IT /F
 
 #Create a scheduled task to trigger the screen lock during the autologon 
-$action = New-ScheduledTaskAction -Execute "%windir%\System32\rundll32.exe" -Argument "user32.dll,LockWorkStation"
-$User = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users"
-$Task = New-ScheduledTask -Action $action -Principal $User 
-Register-ScheduledTask "Screenlock" -InputObject $Task -Force
+$action = New-ScheduledTaskAction -Execute "rundll32.exe" -Argument "user32.dll,LockWorkStation"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "UEMEnrollment"
+$principal = New-ScheduledTaskPrincipal -UserId "UEMEnrollment" -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+Register-ScheduledTask -TaskName "Screenlock" -InputObject $task -Force
+
 
 
 #Trigger restart to restart into the autologon 

@@ -10,8 +10,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-02-15
-    Version      : 1.0.0
+    Date         : 2025-08-29
+    Version      : 1.1.0
     Purpose      : To implement utility functions for verifying the status of the OMA-DM service used by the 
                    Workspace ONE Autorecovery solution.
     Dependencies : Access to the OMA-DM endpoints in the Workspace ONE UEM environment.
