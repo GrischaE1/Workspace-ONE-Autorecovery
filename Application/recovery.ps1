@@ -20,7 +20,7 @@
 .NOTES
     Author       : Grischa Ernst
     Date         : 2025-02-15
-    Version      : 1.0.0
+    Version      : 1.0.1
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, access to Workspace ONE UEM endpoints, and properly configured supporting modules.
     Purpose      : To orchestrate and execute the recovery process by integrating health check outputs with re-enrollment actions.
     Dependencies : May invoke or work in tandem with UEM_automatic_reenrollment.ps1 and relies on supporting functions provided in the solution.
@@ -423,6 +423,22 @@ do {
                 Write-Log "Failed to delete the scheduled task 'WorkspaceONE Recovery': $_" -Severity "ERROR"
                
             }
+
+            Write-Log "Resetting all error counters after successful re-enrollment." -Severity "INFO"
+
+            # Example: update each table's error state to 0
+            $tablesToReset = @("OMADM", "SFD", "WNS", "Eventlog", "TaskScheduler", "HUB")
+
+            foreach ($table in $tablesToReset) {
+                try {
+                    Reset-SQLiteErrorCounter -DbPath $dbPath -TableName $table
+                    Write-Log "Error counter reset for table: $table"
+                }
+                catch {
+                    Write-Log "Failed to reset error counter for $table: $_" -Severity "WARNING"
+                }
+            }
+
 
         }
     }
