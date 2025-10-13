@@ -103,7 +103,7 @@ function Get-WorkspaceOneIntelligentHubVersion {
         $SFDVersionObj = [Version]$SFDinstaller.Version
         $SFDVersion = $SFDVersionObj.ToString()
         if ($SFDVersionObj -ge [Version]"24.10.0.0") {
-            $SFDScheduledTaskPath = "\Workspace ONE\SfdAgent\"
+            $SFDScheduledTaskPath = "\WorkspaceONE\SfdAgent\"
         }
         else {
             $SFDScheduledTaskPath = "\VMware\SfdAgent\"
