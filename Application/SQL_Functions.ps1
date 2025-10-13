@@ -11,7 +11,7 @@
 .NOTES
     Author       : Grischa Ernst
     Date         : 2025-08-29
-    Version      : 1.1.0
+    Version      : 1.1.1
     Purpose      : To centralize SQLite database operations, allowing other scripts in the Workspace ONE Autorecovery
                    solution to log events and manage data efficiently.
     Dependencies : Requires the appropriate SQLite libraries or modules to be installed and accessible in the environment.
@@ -1043,3 +1043,41 @@ function Insert-GeneralData {
         Write-Log "Inserted/updated: Name='$key', Value='$value'" -Severity "DEBUG"
     }
 }
+
+function Reset-SQLiteErrorCounter {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$DbPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$TableName
+    )
+
+    try {
+        # Load SQLite assembly if not already loaded
+        if (-not ([System.Data.SQLite.SQLiteConnection]::Assembly)) {
+            Add-Type -Path "$PSScriptRoot\SQLite\System.Data.SQLite.dll"
+        }
+
+        # Build the SQL connection
+        $connectionString = "Data Source=$DbPath;Version=3;"
+        $connection = New-Object System.Data.SQLite.SQLiteConnection $connectionString
+        $connection.Open()
+
+        # SQL command to reset the error counter
+        $sql = "UPDATE $TableName SET ErrorCount = 0"
+
+        $command = $connection.CreateCommand()
+        $command.CommandText = $sql
+        $rowsAffected = $command.ExecuteNonQuery()
+
+        $connection.Close()
+
+        Write-Log "Reset error counter for table '$TableName'. Rows affected: $rowsAffected" -Severity "INFO"
+    }
+    catch {
+        Write-Log "Failed to reset error counter for table '$TableName': $_" -Severity "ERROR"
+        throw $_
+    }
+}
+
