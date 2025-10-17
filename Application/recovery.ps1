@@ -37,6 +37,41 @@ param(
     [string]$logFilePath = "C:\Windows\UEMRecovery\Logs\recovery.log"
 )
 
+# --- helpers
+
+function Reset-SQLiteErrorCounter {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$DbPath
+    )
+
+    try {
+        # Load SQLite if not already loaded
+        if (-not ([System.Data.SQLite.SQLiteConnection]::Assembly)) {
+            Add-Type -Path "$PSScriptRoot\SQLite\System.Data.SQLite.dll"
+        }
+
+        $connectionString = "Data Source=$DbPath;Version=3;"
+        $connection = New-Object System.Data.SQLite.SQLiteConnection $connectionString
+        $connection.Open()
+
+        $sql = "DELETE FROM Errors;"
+        $command = $connection.CreateCommand()
+        $command.CommandText = $sql
+        $rowsAffected = $command.ExecuteNonQuery()
+
+        $connection.Close()
+
+        Write-Log "All error entries have been cleared. Rows affected: $rowsAffected" -Severity "INFO"
+    }
+    catch {
+        Write-Log "Failed to reset error entries: $_" -Severity "ERROR"
+        throw $_
+    }
+}
+
+
+
 # --- Global timeout watchdog (28 minutes)
 $GlobalTimeoutMinutes = 28
 
@@ -426,20 +461,7 @@ do {
 
             Write-Log "Resetting all error counters after successful re-enrollment." -Severity "INFO"
 
-            # Example: update each table's error state to 0
-            $tablesToReset = @("OMADM", "SFD", "WNS", "Eventlog", "TaskScheduler", "HUB")
-
-            foreach ($table in $tablesToReset) {
-                try {
-                    Reset-SQLiteErrorCounter -DbPath $dbPath -TableName $table
-                    Write-Log "Error counter reset for table: $table"
-                }
-                catch {
-                    Write-Log "Failed to reset error counter for $table: $_" -Severity "WARNING"
-                }
-            }
-
-
+            Reset-SQLiteErrorCounter
         }
     }
 }while ($enrollcheck -eq $false -and $sw.elapsed -lt $timeout)
