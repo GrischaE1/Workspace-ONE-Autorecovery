@@ -19,8 +19,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-02-15
-    Version      : 1.0.1
+    Date         : 2025-10-20
+    Version      : 1.0.2
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, access to Workspace ONE UEM endpoints, and properly configured supporting modules.
     Purpose      : To orchestrate and execute the recovery process by integrating health check outputs with re-enrollment actions.
     Dependencies : May invoke or work in tandem with UEM_automatic_reenrollment.ps1 and relies on supporting functions provided in the solution.
@@ -37,36 +37,71 @@ param(
     [string]$logFilePath = "C:\Windows\UEMRecovery\Logs\recovery.log"
 )
 
+
+# Generate timestamp for log filename (format: yyyy-MM-dd_HH-mm-ss)
+$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+
+# If the log file path wasn't explicitly provided, use default with timestamp
+if (-not $PSBoundParameters.ContainsKey('logFilePath')) {
+    $logFilePath = "C:\Windows\UEMRecovery\Logs\recovery_$timestamp.log"
+}
+
 # --- helpers
 
-function Reset-SQLiteErrorCounter {
+function Clear-SQLiteErrorCounter {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$DbPath
+        [string]$DbPath,
+
+        [int]$MaxRetries = 5,
+        [int]$DelaySeconds = 3
     )
 
-    try {
-        # Load SQLite if not already loaded
-        if (-not ([System.Data.SQLite.SQLiteConnection]::Assembly)) {
-            Add-Type -Path "$PSScriptRoot\SQLite\System.Data.SQLite.dll"
-        }
+    $retryCount = 0
+    $success = $false
 
-        $connectionString = "Data Source=$DbPath;Version=3;"
-        $connection = New-Object System.Data.SQLite.SQLiteConnection $connectionString
-        $connection.Open()
-
-        $sql = "DELETE FROM Errors;"
-        $command = $connection.CreateCommand()
-        $command.CommandText = $sql
-        $rowsAffected = $command.ExecuteNonQuery()
-
-        $connection.Close()
-
-        Write-Log "All error entries have been cleared. Rows affected: $rowsAffected" -Severity "INFO"
+    # Validate DB path
+    if (-not (Test-Path $DbPath)) {
+        Write-Log "ERROR: Database not found at path: $DbPath" -Severity "ERROR"
+        return
     }
-    catch {
-        Write-Log "Failed to reset error entries: $_" -Severity "ERROR"
-        throw $_
+
+    while (-not $success -and $retryCount -lt $MaxRetries) {
+        try {
+            # Load SQLite if not already loaded
+            if (-not ([System.Data.SQLite.SQLiteConnection]::Assembly)) {
+                Add-Type -Path "$PSScriptRoot\SQLite\System.Data.SQLite.dll"
+                Write-Log "Loaded SQLite assembly from $PSScriptRoot\SQLite\System.Data.SQLite.dll"
+            }
+
+            $connectionString = "Data Source=$DbPath;Version=3;"
+            $connection = New-Object System.Data.SQLite.SQLiteConnection $connectionString
+            $connection.Open()
+            Write-Log "Opened SQLite connection to $DbPath"
+
+            $sql = "DELETE FROM Errors;"
+            $command = $connection.CreateCommand()
+            $command.CommandText = $sql
+            $rowsAffected = $command.ExecuteNonQuery()
+
+            $connection.Close()
+
+            Write-Log "All error entries cleared successfully. Rows affected: $rowsAffected" -Severity "INFO"
+            $success = $true
+        }
+        catch {
+            $retryCount++
+            Write-Log "Attempt $retryCount : Failed to reset error entries: $_" -Severity "WARNING"
+
+            if ($retryCount -lt $MaxRetries) {
+                Write-Log "Retrying in $DelaySeconds seconds..."
+                Start-Sleep -Seconds $DelaySeconds
+            }
+            else {
+                Write-Log "All retries failed. Could not reset error entries." -Severity "ERROR"
+                throw $_
+            }
+        }
     }
 }
 
@@ -75,34 +110,6 @@ function Reset-SQLiteErrorCounter {
 # --- Global timeout watchdog (28 minutes)
 $GlobalTimeoutMinutes = 28
 
-Start-Job -Name "RecoveryWatchdog" -ArgumentList $GlobalTimeoutMinutes -ScriptBlock {
-    param($timeoutMinutes)
-    Start-Sleep -Seconds ($timeoutMinutes * 60)
-
-    # Cleanup autologon registry keys
-    $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-    if (Test-Path $RegistryPath) {
-        Remove-ItemProperty $RegistryPath -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
-        Remove-ItemProperty $RegistryPath -Name "DefaultUsername" -ErrorAction SilentlyContinue
-        Remove-ItemProperty $RegistryPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
-        Remove-ItemProperty $RegistryPath -Name "DefaultDomain" -ErrorAction SilentlyContinue
-    }
-
-    $logonPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI"
-    if (Test-Path $logonPath) {
-        Set-ItemProperty $logonPath -Name "LastLoggedOnUser" -Value "" -ErrorAction SilentlyContinue
-        Set-ItemProperty $logonPath -Name "LastLoggedOnUserSID" -Value "" -ErrorAction SilentlyContinue
-        Set-ItemProperty $logonPath -Name "LastLoggedOnDisplayName" -Value "" -ErrorAction SilentlyContinue
-        Set-ItemProperty $logonPath -Name "LastLoggedOnSamUser" -Value "" -ErrorAction SilentlyContinue
-        Set-ItemProperty $logonPath -Name "SelectedUserSID" -Value "" -ErrorAction SilentlyContinue
-    }
-
-    Unregister-ScheduledTask -TaskName "WorkspaceONE Enrollment" -Confirm:$false
-
-    Add-Content -Path "C:\Windows\UEMRecovery\Logs\recovery.txt" -Value \"[Watchdog] Timeout reached. Cleanup executed. Exiting script.\"
-    
-    Stop-Process -Id $PID -Force  # kill the main script process
-} | Out-Null
 
 #importing the SQL functions
 . "$PSScriptRoot\SQL_Functions.ps1"
@@ -180,6 +187,39 @@ catch {
     Write-Log "Failed to download Workspace ONE Agent: $_" -Severity "ERROR"
     exit 1
 }
+
+
+Start-Job -Name "RecoveryWatchdog" -ArgumentList $GlobalTimeoutMinutes -ScriptBlock {
+    param($timeoutMinutes)
+    Start-Sleep -Seconds ($timeoutMinutes * 60)
+
+    # Cleanup autologon registry keys
+    $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    if (Test-Path $RegistryPath) {
+        Remove-ItemProperty $RegistryPath -Name "AutoAdminLogon" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultUsername" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+        Remove-ItemProperty $RegistryPath -Name "DefaultDomain" -ErrorAction SilentlyContinue
+    }
+
+    $logonPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI"
+    if (Test-Path $logonPath) {
+        Set-ItemProperty $logonPath -Name "LastLoggedOnUser" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnUserSID" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnDisplayName" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "LastLoggedOnSamUser" -Value "" -ErrorAction SilentlyContinue
+        Set-ItemProperty $logonPath -Name "SelectedUserSID" -Value "" -ErrorAction SilentlyContinue
+    }
+
+    Unregister-ScheduledTask -TaskName "WorkspaceONE Enrollment" -Confirm:$false
+
+    Add-Content -Path "C:\Windows\UEMRecovery\Logs\recovery.log" -Value \"[Watchdog] Timeout reached. Cleanup executed. Exiting script.\"
+    
+    Stop-Process -Id $PID -Force  # kill the main script process
+
+} | Out-Null
+
+
 
 # Get Enrollment ID
 if ($enrollmentStatus.IsWorkspaceONEEnrolled -eq $True -or $enrollmentStatus.IsOMADMEnrolled -eq $true) {
@@ -461,7 +501,7 @@ do {
 
             Write-Log "Resetting all error counters after successful re-enrollment." -Severity "INFO"
 
-            Reset-SQLiteErrorCounter
+            Clear-SQLiteErrorCounter -DbPath $dbPath
         }
     }
 }while ($enrollcheck -eq $false -and $sw.elapsed -lt $timeout)
@@ -472,8 +512,12 @@ Remove-Item -Path $agentPath -Force
 # Kill watchdog if still running
 Get-Job -Name "RecoveryWatchdog" -State Running | Stop-Job | Remove-Job
 
-if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False" -or ($Configuration.EnrollDuringCurrentUserSession) -eq "False") {
+
+$CurrentUser = $env:USERNAME
+
+if ($CurrentUser -eq "UEMEnrollment") {
     
+    Write-Log "Removing registry keys for re-enrollment outside of the user session" -Severity "INFO"
     
     # Remove autologon settings
     $RegistryPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
@@ -495,3 +539,6 @@ if (($Configuration.ReEnrollmentWithCurrentUserSession) -eq "False" -or ($Config
     Start-Process shutdown.exe -ArgumentList $shutdown
 
 }
+
+Write-Log "Script Finished - Exit" -Severity "INFO"
+exit 0
