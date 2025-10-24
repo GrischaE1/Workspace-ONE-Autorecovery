@@ -32,14 +32,16 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-08-29
-    Version      : 1.1.0
+    Date         : 2025-10-24
+    Version      : 1.1.1
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, proper configuration of supporting scripts, and access to Workspace ONE UEM endpoints.
     Purpose      : To monitor the health of the Workspace ONE hub, detect issues, and initiate notification and remediation processes as needed.
     Dependencies : Relies on supporting function files (General_Functions.ps1, OMA-DM_Status_Check_Functions.ps1, SQL_Functions.ps1, UEM_Status_Check_Functions.ps1).
     Execution    : Intended to be executed as part of an automated scheduled task for continuous monitoring.
 
 .CHANGE LOG
+    1.1.1   Bugfixes:
+                -   Fixed a bug with the selected enrollment days. Some Windows versions require a sorted order, depending on the localization options.
     1.1.0   New Features:
                 -   Added support for registry based config overwrites
                     This will help to change the settings after the initial installation. New settings can be stored here: 'HKLM:\SOFTWARE\UEMRecovery\ConfigOverride'
@@ -274,7 +276,35 @@ if ($EnrollmentStatus.PSObject.Properties.Value -notcontains $false) {
                 # Variables
                 $taskName = "WorkspaceONE Autorepair"
                 $timeOfDay = "$($Configuration.EnrollmentTime)"
-                $dayOfWeek = "$($Configuration.EnrollmentDay)"
+                $daysRaw = "$($Configuration.EnrollmentDay)"
+
+                # Normalize input
+                if ($daysRaw -is [string]) {
+                    $dayOfWeek = $daysRaw -split '[,\s]+' | Where-Object { $_ -ne "" }
+                }
+                elseif ($daysRaw -is [array]) {
+                    $dayOfWeek = $daysRaw
+                }
+                else {
+                    Throw "Invalid format for EnrollmentDay: $daysRaw"
+                }
+
+                # Define correct order for DayOfWeek enum
+                $validDays = [System.DayOfWeek].GetEnumNames()
+
+                # Normalize capitalization (e.g., "monday" -> "Monday")
+                $dayOfWeek = $dayOfWeek | ForEach-Object {
+                    $capitalized = ($_ -replace '^\s+|\s+$', '').Substring(0, 1).ToUpper() + $_.Substring(1).ToLower()
+                    $capitalized
+                }
+
+                # Filter to valid day names and order them correctly
+                $dayOfWeekOrdered = $validDays | Where-Object { $dayOfWeek -contains $_ }
+
+                if (-not $dayOfWeekOrdered) {
+                    Throw "No valid days found in input: $($daysRaw)"
+                }
+
 
                 # Check for Existing Scheduled Task
                 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
@@ -299,7 +329,7 @@ if ($EnrollmentStatus.PSObject.Properties.Value -notcontains $false) {
                 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -ExpectedHash $expectedHash"
 
                 # Create a trigger to run the task weekly on the specified day and time
-                $trigger = New-ScheduledTaskTrigger -Weekly -At $timeOfDay -DaysOfWeek $dayOfWeek
+                $trigger = New-ScheduledTaskTrigger -Weekly -At $timeOfDay -DaysOfWeek $dayOfWeekOrdered
 
 
                 # Register the task
@@ -343,8 +373,7 @@ else {
             $taskName = "WorkspaceONE Recovery"
             $timeOfDay = "$($Configuration.EnrollmentTime)"
 
-            # Normalize EnrollmentDay to array
-            $daysRaw = $Configuration.EnrollmentDay
+            # Normalize input
             if ($daysRaw -is [string]) {
                 $dayOfWeek = $daysRaw -split '[,\s]+' | Where-Object { $_ -ne "" }
             }
@@ -354,6 +383,23 @@ else {
             else {
                 Throw "Invalid format for EnrollmentDay: $daysRaw"
             }
+
+            # Define correct order for DayOfWeek enum
+            $validDays = [System.DayOfWeek].GetEnumNames()
+
+            # Normalize capitalization (e.g., "monday" -> "Monday")
+            $dayOfWeek = $dayOfWeek | ForEach-Object {
+                $capitalized = ($_ -replace '^\s+|\s+$', '').Substring(0, 1).ToUpper() + $_.Substring(1).ToLower()
+                $capitalized
+            }
+
+            # Filter to valid day names and order them correctly
+            $dayOfWeekOrdered = $validDays | Where-Object { $dayOfWeek -contains $_ }
+
+            if (-not $dayOfWeekOrdered) {
+                Throw "No valid days found in input: $($daysRaw)"
+            }
+
 
             # Remove existing scheduled task if it exists
             if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
