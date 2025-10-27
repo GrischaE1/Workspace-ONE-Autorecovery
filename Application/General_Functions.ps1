@@ -11,8 +11,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-08-29
-    Version      : 1.1.0
+    Date         : 2025-10-27
+    Version      : 1.1.1
     Purpose       : To centralize common operations (e.g., logging and error handling) used by the 
                     autorecovery scripts, enabling consistent behavior and easier maintenance.
     Dependencies  : None. This file is intended to be dot-sourced or imported by other scripts.
@@ -744,4 +744,69 @@ function New-EnrollmentScheduledTask {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal
 
     Write-Output "Scheduled task '$taskName' created successfully to run every $dayOfWeek at $timeOfDay."
+}
+
+function Download-WorkspaceONEAgent {
+    param (
+        [string]$WSOServer,
+        [string]$DestinationPath = "C:\Windows\UEMRecovery\AirwatchAgent.msi"
+    )
+
+    Write-Log "Starting Workspace ONE Agent download..." -Severity "INFO"
+
+    $maxRetries = 3
+    $retryDelaySeconds = 10
+    $attempt = 0
+    $downloadSucceeded = $false
+    $downloadUrl = "https://$($WSOServer)/agents/ProtectionAgent_autoseed/airwatchagent.msi"
+
+    try {
+        # Ensure target directory exists
+        $targetDir = Split-Path $DestinationPath -Parent
+        if (-not (Test-Path $targetDir)) {
+            New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
+        }
+
+        # Remove any existing file
+        if (Test-Path $DestinationPath) {
+            Write-Log "Existing agent file found at $DestinationPath — removing before fresh download." -Severity "INFO"
+            Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue
+        }
+
+        # Attempt download with retries
+        while ((-not $downloadSucceeded) -and ($attempt -lt $maxRetries)) {
+            $attempt++
+            try {
+                Write-Log "Attempt #$attempt downloading Workspace ONE Agent from $downloadUrl" -Severity "INFO"
+                $wc = New-Object System.Net.WebClient
+                $wc.DownloadFile($downloadUrl, $DestinationPath)
+
+                if ((Test-Path $DestinationPath) -and ((Get-Item $DestinationPath).Length -gt 0)) {
+                    $size = (Get-Item $DestinationPath).Length
+                    Write-Log "Workspace ONE Agent downloaded successfully (size: $size bytes)" -Severity "INFO"
+                    $downloadSucceeded = $true
+                } else {
+                    throw "File is empty or missing after download."
+                }
+            }
+            catch {
+                Write-Log "Download attempt #$attempt failed: $_" -Severity "ERROR"
+                if ($attempt -lt $maxRetries) {
+                    Write-Log "Retrying in $retryDelaySeconds seconds..." -Severity "INFO"
+                    Start-Sleep -Seconds $retryDelaySeconds
+                }
+            }
+        }
+
+        if (-not $downloadSucceeded) {
+            Write-Log "Failed to download Workspace ONE Agent after $maxRetries attempts." -Severity "ERROR"
+            return $false
+        }
+
+        return $true
+    }
+    catch {
+        Write-Log "Unexpected error in Download-WorkspaceONEAgent: $_" -Severity "ERROR"
+        return $false
+    }
 }
