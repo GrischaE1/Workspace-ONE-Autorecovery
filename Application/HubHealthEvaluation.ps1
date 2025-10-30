@@ -32,14 +32,20 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-10-24
-    Version      : 1.1.1
+    Date         : 2025-10-30
+    Version      : 1.1.3
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, proper configuration of supporting scripts, and access to Workspace ONE UEM endpoints.
     Purpose      : To monitor the health of the Workspace ONE hub, detect issues, and initiate notification and remediation processes as needed.
     Dependencies : Relies on supporting function files (General_Functions.ps1, OMA-DM_Status_Check_Functions.ps1, SQL_Functions.ps1, UEM_Status_Check_Functions.ps1).
     Execution    : Intended to be executed as part of an automated scheduled task for continuous monitoring.
 
 .CHANGE LOG
+    1.1.3   Changed Logic:
+                -   Moved the download of Intelligent Hub to the HubHealthEvaluation.ps1
+                    Recovery action will be only triggered if the Hub was downloaded successfully before
+            Bugfixes:
+                -   restarting the device after recovery / timeout reached and re/enrollment was triggered outside of the current user session
+                -   After the changes for the overwrite functionalitly, the encryption key was not readable
     1.1.1   Bugfixes:
                 -   Fixed a bug with the selected enrollment days. Some Windows versions require a sorted order, depending on the localization options.
     1.1.0   New Features:
@@ -59,7 +65,6 @@
 #>
 
 
-
 param(
     # Specify the MDM provider ID (e.g., "AirwatchMDM", "IntuneMDM", "CustomMDM")
     [ValidateSet("AirwatchMDM", "IntuneMDM", "CustomMDM")]
@@ -72,9 +77,11 @@ param(
 
     #The Hash value for this script, to make sure the script was not modified
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedHash
+    [string]$ExpectedHash 
 
 )
+
+
 
 #Set the install directory
 $DestinationPath = "C:\Windows\UEMRecovery"
@@ -235,12 +242,24 @@ if (Test-Path $overrideKey) {
 #Get the configuration
 $Configuration = Read-SQLiteTable -DbPath $dbPath -TableName "Configurations"
 
+$EncryptionKey = Read-SQLiteTable -DbPath $dbPath -TableName "Encryption" | select EncryptionKey -ExpandProperty EncryptionKey
+        if (-not $EncryptionKey) {
+            Write-Error "EncryptionKey not found."
+            exit 1
+        }
+
 #Cleanup the DB 
 $CleanupTables = @("OMADM", "HUB", "SFD", "WNS", "Eventlog", "TaskScheduler")
 Foreach ($Table in $CleanupTables) {
     Remove-SQLiteOldEntries -DbPath $dbPath -TableName "OMADM" -Days '14'
 }
 
+$UEMCredentials = Read-CredentialsRecord -DbPath $dbPath -EncryptionKey $EncryptionKey
+if (-not $UEMCredentials -or $UEMCredentials.Count -eq 0) {
+    Write-Error "Failed to read credentials from the database. Aborting script."
+    exit 1
+}
+$WSOServer = "$($UEMCredentials.Url)"
 
 # Check if Device is enrolled (Workspace ONE and OMA-DM)
 $EnrollmentStatus = Test-EnrollmentStatus
@@ -269,6 +288,13 @@ if ($EnrollmentStatus.PSObject.Properties.Value -notcontains $false) {
 
     if ($ErrorThresholdReached -eq $True) {
         if (($Configuration.AutoReEnrollment) -eq "True") {
+
+            #Download Workspace ONE Intelligent Hub
+            if (-not (Download-WorkspaceONEAgent -WSOServer $WSOServer)) {
+                Write-Log "Agent download failed — skipping autoreenrollment setup." -Severity "ERROR"
+                return
+            }
+
             if (($Configuration.EnrollmentDefinedDate) -eq "True") {
                 
                 # Create scheduled task to re-enroll the device
@@ -368,6 +394,13 @@ if ($EnrollmentStatus.PSObject.Properties.Value -notcontains $false) {
 }
 else {
     if (($Configuration.EnrollIfNotEnrolled) -eq "True") {
+
+        # Download Workspace ONE Intelligent Hub
+        if (-not (Download-WorkspaceONEAgent -WSOServer $WSOServer)) {
+            Write-Log "Agent download failed — skipping enrollment." -Severity "ERROR"
+            return
+        }
+
         if (($Configuration.EnrollmentDefinedDate) -eq "True") {
     
             $taskName = "WorkspaceONE Recovery"
@@ -499,4 +532,3 @@ else {
 
     }
 }
-
