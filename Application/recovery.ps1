@@ -5,7 +5,7 @@
 .DESCRIPTION
     The recovery.ps1 script serves as the central orchestrator for initiating recovery actions when issues are detected in the Workspace ONE environment.
     It integrates detection results from health checks with the re-enrollment logic to restore devices to a compliant state.
-    By coordinating the remediation process—potentially invoking additional scripts or functions such as UEM_automatic_reenrollment.ps1—this script
+    By coordinating the remediation processâ€”potentially invoking additional scripts or functions such as UEM_automatic_reenrollment.ps1â€”this script
     ensures that devices which have fallen out of compliance are automatically re-enrolled and returned to proper management.
     This script is designed to be triggered automatically as part of an overall remediation workflow following health evaluation procedures.
 
@@ -19,8 +19,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-10-20
-    Version      : 1.0.2
+    Date         : 2025-10-30
+    Version      : 1.1.3
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, access to Workspace ONE UEM endpoints, and properly configured supporting modules.
     Purpose      : To orchestrate and execute the recovery process by integrating health check outputs with re-enrollment actions.
     Dependencies : May invoke or work in tandem with UEM_automatic_reenrollment.ps1 and relies on supporting functions provided in the solution.
@@ -174,19 +174,6 @@ do {
     }
         
 }while (!$Process)
-
-# Download Workspace ONE Agent
-try {
-    Write-Log "Workspace ONE Agent download started" -Severity "INFO"
-    $WebClient = New-Object System.Net.WebClient
-    $agentPath = "C:\Windows\UEMRecovery\AirwatchAgent.msi"
-    $WebClient.DownloadFile("https://$($WSOServer)/agents/ProtectionAgent_autoseed/airwatchagent.msi", $agentPath)
-    Write-Log "Workspace ONE Agent downloaded successfully to $agentPath." -Severity "INFO"
-}
-catch {
-    Write-Log "Failed to download Workspace ONE Agent: $_" -Severity "ERROR"
-    exit 1
-}
 
 
 Start-Job -Name "RecoveryWatchdog" -ArgumentList $GlobalTimeoutMinutes -ScriptBlock {
