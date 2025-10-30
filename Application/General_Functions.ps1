@@ -11,8 +11,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-10-27
-    Version      : 1.1.1
+    Date         : 2025-10-30
+    Version      : 1.1.3
     Purpose       : To centralize common operations (e.g., logging and error handling) used by the 
                     autorecovery scripts, enabling consistent behavior and easier maintenance.
     Dependencies  : None. This file is intended to be dot-sourced or imported by other scripts.
@@ -777,15 +777,29 @@ function Download-WorkspaceONEAgent {
         while ((-not $downloadSucceeded) -and ($attempt -lt $maxRetries)) {
             $attempt++
             try {
-                Write-Log "Attempt #$attempt downloading Workspace ONE Agent from $downloadUrl" -Severity "INFO"
-                $wc = New-Object System.Net.WebClient
-                $wc.DownloadFile($downloadUrl, $DestinationPath)
+                Write-Log "Attempt #$attempt downloading Workspace ONE Agent via BITS from $downloadUrl" -Severity "INFO"
+
+                try {
+                    # Try using BITS first
+                    Start-BitsTransfer -Source $downloadUrl -Destination $DestinationPath -TransferType Download -ErrorAction Stop
+                    $method = "BITS"
+                }
+                catch {
+                    Write-Log "BITS transfer failed on attempt #$attempt : $_" -Severity "WARN"
+                    Write-Log "Falling back to WebClient method..." -Severity "INFO"
+
+                    # Fallback to WebClient
+                    $wc = New-Object System.Net.WebClient
+                    $wc.DownloadFile($downloadUrl, $DestinationPath)
+                    $method = "WebClient"
+                }
 
                 if ((Test-Path $DestinationPath) -and ((Get-Item $DestinationPath).Length -gt 0)) {
                     $size = (Get-Item $DestinationPath).Length
-                    Write-Log "Workspace ONE Agent downloaded successfully (size: $size bytes)" -Severity "INFO"
+                    Write-Log "Workspace ONE Agent downloaded successfully using $method (size: $size bytes)" -Severity "INFO"
                     $downloadSucceeded = $true
-                } else {
+                }
+                else {
                     throw "File is empty or missing after download."
                 }
             }
@@ -810,3 +824,5 @@ function Download-WorkspaceONEAgent {
         return $false
     }
 }
+
+
