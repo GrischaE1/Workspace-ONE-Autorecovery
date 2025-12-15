@@ -824,5 +824,3 @@ function Download-WorkspaceONEAgent {
         return $false
     }
 }
-
-
