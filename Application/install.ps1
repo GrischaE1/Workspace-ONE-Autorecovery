@@ -27,8 +27,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-08-29
-    Version      : 1.1.0
+    Date         : 2025-12-15
+    Version      : 1.1.1
     Requirements  : 
                       - PowerShell 5.1 or later / PowerShell Core 7+
                       - Administrator privileges
@@ -48,7 +48,7 @@ param (
 
     #Expected Hash of the HubHealthEvaluation.ps1 file
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedHash
+    [string]$ExpectedHash 
 )
 
 Start-Transcript -Path C:\Temp\install.log -Force
@@ -186,14 +186,279 @@ catch {
 # Create SQLite Database and Insert Credentials
 # -------------------------------
 
-# Define the path to the SQLLite Data
+# -------------------------------
+# Prepare SQLite Environment (x64 only) with VC++ Redistributable Check
+# -------------------------------
+
+function Test-SQLiteLoaded {
+    <#
+    .SYNOPSIS
+    Tests if SQLite can be loaded and accessed.
+    #>
+    try {
+        $version = [System.Data.SQLite.SQLiteConnection]::SQLiteVersion
+        Write-Output "SQLite version loaded: $version"
+        return $true
+    }
+    catch {
+        Write-Warning "SQLite test failed: $_"
+        return $false
+    }
+}
+
+function Test-VCRedistInstalled {
+    <#
+    .SYNOPSIS
+    Checks if Visual C++ Redistributable x64 is installed.
+    #>
+    try {
+        # Check for VC++ Redistributable 2015-2022 (the latest unified version)
+        $vcRedist = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue
+        
+        if ($vcRedist -and $vcRedist.Installed -eq 1) {
+            Write-Output "Visual C++ Redistributable x64 is installed (Version: $($vcRedist.Version))"
+            return $true
+        }
+        
+        # Also check the WOW6432Node for compatibility
+        $vcRedistWow = Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue
+        
+        if ($vcRedistWow -and $vcRedistWow.Installed -eq 1) {
+            Write-Output "Visual C++ Redistributable x64 is installed (Version: $($vcRedistWow.Version))"
+            return $true
+        }
+        
+        Write-Warning "Visual C++ Redistributable x64 is not installed."
+        return $false
+    }
+    catch {
+        Write-Warning "Error checking for VC++ Redistributable: $_"
+        return $false
+    }
+}
+
+function Install-VCRedist {
+    <#
+    .SYNOPSIS
+    Downloads and installs Visual C++ Redistributable x64.
+    #>
+    param(
+        [string]$DownloadPath = "$env:TEMP\vc_redist.x64.exe"
+    )
+    
+    try {
+        $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        
+        Write-Output "Downloading Visual C++ Redistributable x64..."
+        Write-Output "Source: $vcRedistUrl"
+        Write-Output "Destination: $DownloadPath"
+        
+        # Download using BITS or WebClient
+        try {
+            Start-BitsTransfer -Source $vcRedistUrl -Destination $DownloadPath -ErrorAction Stop
+            Write-Output "Download completed using BITS."
+        }
+        catch {
+            Write-Warning "BITS transfer failed, using WebClient..."
+            $webClient = New-Object System.Net.WebClient
+            $webClient.DownloadFile($vcRedistUrl, $DownloadPath)
+            $webClient.Dispose()
+            Write-Output "Download completed using WebClient."
+        }
+        
+        # Verify download
+        if (-not (Test-Path $DownloadPath)) {
+            throw "Downloaded file not found at: $DownloadPath"
+        }
+        
+        $fileSize = (Get-Item $DownloadPath).Length
+        if ($fileSize -lt 1MB) {
+            throw "Downloaded file is too small ($fileSize bytes). Download may have failed."
+        }
+        
+        Write-Output "Installing Visual C++ Redistributable x64..."
+        Write-Output "File size: $fileSize bytes"
+        
+        # Install silently with /quiet /norestart
+        $installProcess = Start-Process -FilePath $DownloadPath -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+        
+        if ($installProcess.ExitCode -eq 0) {
+            Write-Output "Visual C++ Redistributable installed successfully."
+            return $true
+        }
+        elseif ($installProcess.ExitCode -eq 3010) {
+            Write-Warning "Visual C++ Redistributable installed successfully, but a reboot is required."
+            return $true
+        }
+        else {
+            Write-Error "Visual C++ Redistributable installation failed with exit code: $($installProcess.ExitCode)"
+            return $false
+        }
+    }
+    catch {
+        Write-Error "Error during VC++ Redistributable installation: $_"
+        return $false
+    }
+    finally {
+        # Clean up downloaded file
+        if (Test-Path $DownloadPath) {
+            Remove-Item $DownloadPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# Main SQLite Loading Logic
+# -------------------------
+
+# Define the path to the SQLite Data
 $SQLPath = "$($DestinationPath)\SQLite"
 
-# Adjust the path to where your System.Data.SQLite.dll is located and unblock files
-Get-ChildItem -Path $SQLPath | Unblock-File
+# Verify SQLite files exist
+if (-not (Test-Path $SQLPath)) {
+    Write-Error "SQLite folder not found at: $SQLPath"
+    Write-Error "CRITICAL: Cannot proceed without SQLite files. Exiting installation."
+    Stop-Transcript
+    exit 1
+}
 
-# Add the .dll to work with SQLite
-Add-Type -Path "$($SQLPath)\System.Data.SQLite.dll"
+Write-Output "`n========================================="
+Write-Output "Preparing SQLite Environment"
+Write-Output "=========================================`n"
+
+# Define file paths
+$mainDll = Join-Path -Path $SQLPath -ChildPath "System.Data.SQLite.dll"
+$nativeDllRoot = Join-Path -Path $SQLPath -ChildPath "SQLite.Interop.dll"
+
+# Verify System.Data.SQLite.dll exists
+if (-not (Test-Path $mainDll)) {
+    Write-Error "System.Data.SQLite.dll not found at: $mainDll"
+    Write-Error "CRITICAL: Required SQLite library missing. Exiting installation."
+    Stop-Transcript
+    exit 1
+}
+
+# Unblock ALL files recursively
+Write-Output "Unblocking all SQLite files..."
+Get-ChildItem -Path $SQLPath -Recurse -File | ForEach-Object {
+    Unblock-File -Path $_.FullName -Confirm:$false
+}
+Write-Output "All SQLite files unblocked.`n"
+
+
+# Verify the copy succeeded
+if (-not (Test-Path $nativeDllRoot)) {
+    Write-Error "Failed to copy SQLite.Interop.dll to root folder"
+    Write-Error "CRITICAL: Cannot prepare SQLite environment. Exiting installation."
+    Stop-Transcript
+    exit 1
+}
+
+# Add SQLite paths to environment PATH
+$env:PATH = "$SQLPath"
+Write-Output "Added SQLite paths to session PATH.`n"
+
+# Attempt to load SQLite
+Write-Output "Loading System.Data.SQLite.dll..."
+try {
+    Add-Type -Path $mainDll
+    Write-Output "System.Data.SQLite.dll loaded into session.`n"
+}
+catch {
+    Write-Error "Failed to load System.Data.SQLite.dll: $_"
+    Write-Error "CRITICAL: Cannot load SQLite library. Exiting installation."
+    Stop-Transcript
+    exit 1
+}
+
+# Test if SQLite actually works (FIRST ATTEMPT)
+Write-Output "Testing SQLite functionality..."
+$sqliteWorking = Test-SQLiteLoaded
+
+if ($sqliteWorking) {
+    Write-Output "`n========================================="
+    Write-Output "SQLite loaded and verified successfully!"
+    Write-Output "=========================================`n"
+}
+else {
+    Write-Warning "`nSQLite loaded but cannot access SQLiteConnection."
+    Write-Warning "This typically indicates missing Visual C++ Redistributable.`n"
+    
+    # Check if VC++ Redistributable is installed
+    Write-Output "Checking for Visual C++ Redistributable x64..."
+    $vcInstalled = Test-VCRedistInstalled
+    
+    if (-not $vcInstalled) {
+        Write-Output "`nVisual C++ Redistributable x64 is NOT installed."
+        Write-Output "Attempting to download and install...`n"
+        
+        $installSuccess = Install-VCRedist
+        
+        if (-not $installSuccess) {
+            Write-Error "`n========================================="
+            Write-Error "CRITICAL ERROR: Failed to install Visual C++ Redistributable"
+            Write-Error "========================================="
+            Write-Error "SQLite requires Visual C++ Redistributable x64 to function."
+            Write-Error "Please manually download and install from:"
+            Write-Error "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+            Write-Error "Then re-run this installation script."
+            Write-Error "=========================================`n"
+            Stop-Transcript
+            exit 1
+        }
+        
+        # VC++ installed, test SQLite again (SECOND ATTEMPT)
+        Write-Output "`nVisual C++ Redistributable installed. Testing SQLite again..."
+        $sqliteWorking = Test-SQLiteLoaded
+        
+        if ($sqliteWorking) {
+            Write-Output "`n========================================="
+            Write-Output "SQLite now working after VC++ installation!"
+            Write-Output "=========================================`n"
+        }
+        else {
+            Write-Error "`n========================================="
+            Write-Error "CRITICAL ERROR: SQLite still not working"
+            Write-Error "========================================="
+            Write-Error "Visual C++ Redistributable was installed, but SQLite still cannot load."
+            Write-Error "Possible issues:"
+            Write-Error "  1. A system reboot may be required"
+            Write-Error "  2. SQLite files may be corrupted"
+            Write-Error "  3. Additional dependencies may be missing"
+            Write-Error ""
+            Write-Error "Please try:"
+            Write-Error "  1. Reboot the system"
+            Write-Error "  2. Re-run this installation script"
+            Write-Error "  3. If problem persists, contact support"
+            Write-Error "=========================================`n"
+            Stop-Transcript
+            exit 1
+        }
+    }
+    else {
+        # VC++ is installed but SQLite still doesn't work
+        Write-Error "`n========================================="
+        Write-Error "CRITICAL ERROR: SQLite cannot load"
+        Write-Error "========================================="
+        Write-Error "Visual C++ Redistributable IS installed, but SQLite still cannot load."
+        Write-Error "This indicates a different issue:"
+        Write-Error "  1. SQLite files may be corrupted or blocked"
+        Write-Error "  2. Insufficient permissions"
+        Write-Error "  3. Conflicting DLL versions"
+        Write-Error "  4. System may need a reboot"
+        Write-Error ""
+        Write-Error "Troubleshooting steps:"
+        Write-Error "  1. Verify all files in $SQLPath are unblocked"
+        Write-Error "  2. Run this script as Administrator"
+        Write-Error "  3. Reboot the system and try again"
+        Write-Error "  4. Re-download SQLite files"
+        Write-Error "=========================================`n"
+        Stop-Transcript
+        exit 1
+    }
+}
+
+# Continue with database creation if we reach here
+Write-Output "Proceeding with database creation...`n"
 
 # Define the SQLite database file path  
 $dbPath = "$DestinationPath\HUBHealth.sqlite"
