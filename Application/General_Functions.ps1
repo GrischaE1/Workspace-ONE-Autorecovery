@@ -11,8 +11,8 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-10-30
-    Version      : 1.1.3
+    Date         : 2025-12-15
+    Version      : 1.1.4
     Purpose       : To centralize common operations (e.g., logging and error handling) used by the 
                     autorecovery scripts, enabling consistent behavior and easier maintenance.
     Dependencies  : None. This file is intended to be dot-sourced or imported by other scripts.
