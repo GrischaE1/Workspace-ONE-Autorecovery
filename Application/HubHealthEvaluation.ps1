@@ -32,14 +32,16 @@
 
 .NOTES
     Author       : Grischa Ernst
-    Date         : 2025-10-30
-    Version      : 1.1.3
+    Date         : 2025-12-15
+    Version      : 1.1.4
     Requirements : PowerShell 5.1 or later / PowerShell Core 7+, proper configuration of supporting scripts, and access to Workspace ONE UEM endpoints.
     Purpose      : To monitor the health of the Workspace ONE hub, detect issues, and initiate notification and remediation processes as needed.
     Dependencies : Relies on supporting function files (General_Functions.ps1, OMA-DM_Status_Check_Functions.ps1, SQL_Functions.ps1, UEM_Status_Check_Functions.ps1).
     Execution    : Intended to be executed as part of an automated scheduled task for continuous monitoring.
 
 .CHANGE LOG
+    1.1.4   Bugfixes:
+                -   fixed parsing error for line-continuation backtick break
     1.1.3   Changed Logic:
                 -   Moved the download of Intelligent Hub to the HubHealthEvaluation.ps1
                     Recovery action will be only triggered if the Hub was downloaded successfully before
@@ -157,7 +159,7 @@ else {
 Write-Output "Checking for new settings"
 $overrideKey = 'HKLM:\SOFTWARE\UEMRecovery\ConfigOverride'
 if (Test-Path $overrideKey) {
-    Write-Output "New settings detected - writing to SQL Databse" 
+    Write-Output "New settings detected - writing to SQL Database" 
     # Read all values under the override key
     $overrideProps = Get-ItemProperty -Path $overrideKey
 
@@ -188,12 +190,15 @@ if (Test-Path $overrideKey) {
     # 2a) Apply Config Overrides
     if ($configData.Count) {
         Write-output "Applying configuration overrides from registry..."
-        Insert-SQLiteRecord `
-            -DbPath $dbPath `
-            -TableName 'Configurations' `
-            -Data $configData `
-            -Overwrite `
-            -UniqueCondition '1=1'
+        $params = @{
+            DbPath        = $dbPath
+            Url           = $merged.Url
+            Username      = $merged.Username
+            Password      = $merged.Password
+            OG            = $merged.OG
+            EncryptionKey = $encKey
+        }
+        Write-CredentialsRecord @params
     }
 
     # 2b) Merge & Apply Credential Overrides
@@ -243,10 +248,10 @@ if (Test-Path $overrideKey) {
 $Configuration = Read-SQLiteTable -DbPath $dbPath -TableName "Configurations"
 
 $EncryptionKey = Read-SQLiteTable -DbPath $dbPath -TableName "Encryption" | select EncryptionKey -ExpandProperty EncryptionKey
-        if (-not $EncryptionKey) {
-            Write-Error "EncryptionKey not found."
-            exit 1
-        }
+if (-not $EncryptionKey) {
+    Write-Error "EncryptionKey not found."
+    exit 1
+}
 
 #Cleanup the DB 
 $CleanupTables = @("OMADM", "HUB", "SFD", "WNS", "Eventlog", "TaskScheduler")
